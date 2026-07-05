@@ -108,7 +108,7 @@ export class ChatService {
     const retrievalDebug = retrieved.map(toRetrievalDebugChunk);
     await write({ type: 'retrieval', chunks: retrievalDebug });
 
-    const history = await this.loadRecentHistory(workspaceId);
+    const history = await this.loadRecentHistory(workspaceId, userMessage.id);
     const aiMessages = this.buildInitialAiMessages(history, content, retrieved);
     const executedToolCallIds: string[] = [];
     let result = await this.ai.generate({
@@ -187,9 +187,12 @@ export class ChatService {
     });
   }
 
-  private async loadRecentHistory(workspaceId: string): Promise<AiMessage[]> {
+  private async loadRecentHistory(workspaceId: string, excludeMessageId: string): Promise<AiMessage[]> {
     const messages = await this.prisma.message.findMany({
-      where: { workspaceId },
+      where: {
+        workspaceId,
+        id: { not: excludeMessageId },
+      },
       orderBy: { createdAt: 'desc' },
       take: 8,
     });
@@ -284,11 +287,11 @@ export class ChatService {
     retrieved: RetrievedChunk[],
     hadToolCalls: boolean,
   ): CitationDto[] {
-    if (hadToolCalls || isFullyUnsupportedAnswer(finalText)) {
+    if (retrieved.length === 0 || isFullyUnsupportedAnswer(finalText)) {
       return [];
     }
 
-    return retrieved.slice(0, 3).map((chunk) => ({
+    return selectCitationChunks(finalText, retrieved, hadToolCalls).map((chunk) => ({
       documentId: chunk.documentId,
       documentName: chunk.documentName,
       chunkId: chunk.chunkId,
@@ -315,6 +318,29 @@ export function isFullyUnsupportedAnswer(text: string): boolean {
     normalized === "i don't know from this workspace's documents" ||
     normalized === 'i do not know from this workspace\'s documents'
   );
+}
+
+export function selectCitationChunks<T extends Pick<RetrievedChunk, 'chunkId' | 'documentName' | 'section'>>(
+  finalText: string,
+  retrieved: T[],
+  hadToolCalls: boolean,
+): T[] {
+  const referenced = retrieved.filter((chunk) => isChunkReferenced(finalText, chunk));
+  if (referenced.length > 0) {
+    return referenced.slice(0, 3);
+  }
+
+  return hadToolCalls ? [] : retrieved.slice(0, 3);
+}
+
+function isChunkReferenced(
+  finalText: string,
+  chunk: Pick<RetrievedChunk, 'chunkId' | 'documentName' | 'section'>,
+): boolean {
+  const normalizedText = finalText.toLowerCase();
+  return [chunk.documentName, chunk.chunkId, chunk.section]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => normalizedText.includes(value.toLowerCase()));
 }
 
 function toRetrievalDebugChunk(chunk: RetrievedChunk): RetrievalDebugChunkDto {
