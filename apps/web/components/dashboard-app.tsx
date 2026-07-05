@@ -329,7 +329,7 @@ export function DashboardApp(): React.JSX.Element {
   return (
     <main className="min-h-screen px-4 py-5 lg:px-6">
       <div className="mx-auto grid max-w-[1500px] gap-5 lg:grid-cols-[320px_1fr]">
-        <aside className="glass-panel rounded-lg p-4 lg:sticky lg:top-5 lg:h-[calc(100vh-40px)]">
+        <aside className="glass-panel scrollbar-thin overflow-x-hidden rounded-lg p-4 lg:sticky lg:top-5 lg:max-h-[calc(100vh-40px)] lg:overflow-y-auto">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-moss">Workspace</p>
@@ -351,14 +351,16 @@ export function DashboardApp(): React.JSX.Element {
                 key={workspace.id}
                 onClick={() => setActiveWorkspaceId(workspace.id)}
                 className={cn(
-                  'flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition',
+                  'flex w-full min-w-0 items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition',
                   workspace.id === activeWorkspaceId
                     ? 'bg-ink text-white'
                     : 'bg-white text-ink hover:bg-ink/5',
                 )}
               >
-                <span>{workspace.name}</span>
-                <Badge tone={workspace.role === 'owner' ? 'green' : 'neutral'}>{workspace.role}</Badge>
+                <span className="min-w-0 truncate">{workspace.name}</span>
+                <Badge className="shrink-0" tone={workspace.role === 'owner' ? 'green' : 'neutral'}>
+                  {workspace.role}
+                </Badge>
               </button>
             ))}
           </div>
