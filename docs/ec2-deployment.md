@@ -11,14 +11,18 @@ This app can run on the existing EC2 host without disturbing the current apps if
 
 ## Target Layout
 - Repo: `/home/ubuntu/apps/workspace-rag-assistant`
-- API env: `/home/ubuntu/apps/workspace-rag-assistant/apps/api/.env`
-- Web env: `/home/ubuntu/apps/workspace-rag-assistant/apps/web/.env.production`
+- API config: `/home/ubuntu/config/workspace-rag/api/.env`
+- Web config: `/home/ubuntu/config/workspace-rag/web/.env.production`
+- API env symlink: `/home/ubuntu/apps/workspace-rag-assistant/apps/api/.env`
+- Web env symlink: `/home/ubuntu/apps/workspace-rag-assistant/apps/web/.env.production`
+- Deploy script: `/home/ubuntu/scripts/workspace-rag/deploy.sh`
+- PM2 config: `/home/ubuntu/scripts/workspace-rag/ecosystem.config.js`
 - API process: `workspace-rag-api` on `127.0.0.1:4100`
 - Web process: `workspace-rag-web` on `127.0.0.1:3100`
 - Database: local Postgres database `workspace_rag`
 - Database user: `workspace_rag_app`
 
-## One-Time Server Prep
+## App Checkout
 
 Run this over SSH:
 
@@ -26,21 +30,38 @@ Run this over SSH:
 ssh -F /dev/null -i /home/roxiler/Downloads/ec2-key.pem -o IdentitiesOnly=yes ubuntu@13.203.58.41
 ```
 
-Install pgvector for the existing PostgreSQL 18 server:
+Check out the app:
 
 ```bash
-sudo apt update
-sudo apt install -y postgresql-18-pgvector
+cd /home/ubuntu/apps
+git clone https://github.com/Shantanub05/workspace-rag-assistant.git
+cd workspace-rag-assistant
+export PATH=/home/ubuntu/.nvm/versions/node/v22.22.3/bin:$PATH
 ```
 
-Recommended on this t3.small because it currently has no swap:
+Install the server-level config/script layout:
 
 ```bash
-sudo fallocate -l 2G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+bash deploy/ec2/scripts/install-server-files.sh
+```
+
+This creates:
+
+```text
+/home/ubuntu/config/workspace-rag/api/.env
+/home/ubuntu/config/workspace-rag/web/.env.production
+/home/ubuntu/scripts/workspace-rag/deploy.sh
+/home/ubuntu/scripts/workspace-rag/ecosystem.config.js
+```
+
+It also symlinks app env files to the config directory, matching the existing `proctorpal` and `interviewcoach` pattern.
+
+## One-Time Server Prep
+
+Install pgvector, create swap, and activate pnpm:
+
+```bash
+bash deploy/ec2/scripts/setup-prereqs.sh
 ```
 
 Create a database password locally:
@@ -52,52 +73,30 @@ openssl rand -base64 32
 Create the isolated DB and enable pgvector:
 
 ```bash
-sudo -u postgres psql
+DB_PASSWORD="replace-with-db-password" pnpm ec2:setup-db
 ```
 
-```sql
-CREATE USER workspace_rag_app WITH PASSWORD 'replace-with-db-password';
-CREATE DATABASE workspace_rag OWNER workspace_rag_app;
-\connect workspace_rag
-CREATE EXTENSION IF NOT EXISTS vector;
-\q
-```
-
-## App Checkout
+Run the host check any time:
 
 ```bash
-cd /home/ubuntu/apps
-git clone https://github.com/Shantanub05/workspace-rag-assistant.git
-cd workspace-rag-assistant
-export PATH=/home/ubuntu/.nvm/versions/node/v22.22.3/bin:$PATH
-corepack enable
-corepack prepare pnpm@11.5.0 --activate
-pnpm install --frozen-lockfile
+pnpm ec2:check
 ```
 
-Create real env files from the samples:
-
-```bash
-cp deploy/ec2/api.env.example apps/api/.env
-cp deploy/ec2/web.env.production.example apps/web/.env.production
-chmod 600 apps/api/.env apps/web/.env.production
-```
-
-Edit both files and replace placeholders. The app needs a real domain with HTTPS for production cookies.
+Edit both config files and replace placeholders. The app needs a real domain with HTTPS for production cookies.
 
 ## Build, Migrate, Seed
 
 ```bash
-pnpm db:deploy
-pnpm db:seed
-pnpm build
+/home/ubuntu/scripts/workspace-rag/deploy.sh
 ```
 
-## PM2
+The deploy script pulls `main`, installs dependencies, runs migrations, seeds reviewer data, builds, starts/reloads PM2, and performs local health checks.
+
+## PM2 Manual Commands
 
 ```bash
 export PATH=/home/ubuntu/.nvm/versions/node/v22.22.3/bin:$PATH
-pm2 start deploy/ec2/ecosystem.config.cjs
+pm2 start /home/ubuntu/scripts/workspace-rag/ecosystem.config.js
 pm2 save
 pm2 list
 ```
@@ -107,17 +106,13 @@ pm2 list
 Use a dedicated domain such as `workspace-rag.example.com`; do not reuse the existing app domains.
 
 ```bash
-sudo cp deploy/ec2/nginx.workspace-rag.conf.example /etc/nginx/sites-available/workspace-rag
-sudo nano /etc/nginx/sites-available/workspace-rag
-sudo ln -s /etc/nginx/sites-available/workspace-rag /etc/nginx/sites-enabled/workspace-rag
-sudo nginx -t
-sudo systemctl reload nginx
+APP_DOMAIN=workspace-rag.example.com pnpm ec2:nginx
 ```
 
 Enable HTTPS:
 
 ```bash
-sudo certbot --nginx -d workspace-rag.example.com
+APP_DOMAIN=workspace-rag.example.com ENABLE_CERTBOT=1 pnpm ec2:nginx
 ```
 
 After Certbot completes, confirm Nginx still validates:
