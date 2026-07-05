@@ -75,8 +75,6 @@ pnpm e2e
 
 ## Deployment Notes
 
-For the existing EC2 server option, use [docs/ec2-deployment.md](docs/ec2-deployment.md). It keeps the app isolated under `/home/ubuntu/apps/workspace-rag-assistant` with separate PM2 process names, ports, database, and Nginx site.
-
 1. Create a Neon free Postgres project and enable `vector`.
 2. Set `DATABASE_URL` in Render and run `pnpm db:deploy && pnpm db:seed`.
 3. Deploy `apps/api` to Render as a Node web service from the repository root with build command `corepack enable && pnpm install --frozen-lockfile && pnpm --filter @workspace-rag/api build` and start command `pnpm --filter @workspace-rag/api start`.
