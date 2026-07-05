@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import ReactMarkdown from 'react-markdown';
 import {
   Bot,
   BrainCircuit,
@@ -496,10 +497,8 @@ function ChatPanel({
                 <Bot className="h-4 w-4" />
                 Assistant streaming
               </div>
-              <p className="whitespace-pre-wrap text-sm leading-6">
-                {assistantDraft}
-                <span className="ml-1 inline-block h-4 w-1 animate-cursor bg-moss align-middle" />
-              </p>
+              <MarkdownContent content={assistantDraft} />
+              <span className="mt-1 inline-block h-4 w-1 animate-cursor bg-moss align-middle" />
             </div>
           ) : null}
         </div>
@@ -550,7 +549,11 @@ function MessageBubble({ message }: { message: MessageDto }): React.JSX.Element 
         <span>{isUser ? 'You' : 'Assistant'}</span>
         <span>{formatTime(message.createdAt)}</span>
       </div>
-      <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+      {isUser ? (
+        <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+      ) : (
+        <MarkdownContent content={message.content} />
+      )}
       {message.citations.length > 0 ? (
         <div className="mt-4 space-y-2">
           {message.citations.map((citation) => (
@@ -566,6 +569,59 @@ function MessageBubble({ message }: { message: MessageDto }): React.JSX.Element 
         </div>
       ) : null}
     </motion.article>
+  );
+}
+
+function MarkdownContent({ content }: { content: string }): React.JSX.Element {
+  return (
+    <div className="text-sm leading-6 text-inherit">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+          ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+          li: ({ children }) => <li className="pl-1">{children}</li>,
+          strong: ({ children }) => <strong className="font-semibold text-inherit">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children, className }) => {
+            const isBlock = className?.startsWith('language-') ?? false;
+            return (
+              <code
+                className={cn(
+                  'font-mono text-[0.85em]',
+                  isBlock
+                    ? 'bg-transparent p-0 text-white'
+                    : 'rounded border border-ink/10 bg-paper px-1.5 py-0.5 text-ink',
+                  className,
+                )}
+              >
+                {children}
+              </code>
+            );
+          },
+          pre: ({ children }) => (
+            <pre className="my-3 overflow-x-auto rounded-md bg-ink p-3 text-xs leading-5 text-white">
+              {children}
+            </pre>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="my-3 border-l-2 border-moss/50 pl-3 text-ink/70">{children}</blockquote>
+          ),
+          a: ({ children, href }) => (
+            <a
+              className="font-medium text-lagoon underline underline-offset-4"
+              href={href}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   );
 }
 
