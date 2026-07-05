@@ -14,7 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RetrievalService, type RetrievedChunk } from '../retrieval/retrieval.service';
 import { ToolsService } from '../tools/tools.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
-import { parseDirectToolRequest } from './direct-tool-request';
+import { getToolExecutionSkipReason, parseDirectToolRequest } from './direct-tool-request';
 import { buildRagSystemPrompt, formatRetrievedContext } from './prompt';
 
 type StreamWriter = (event: ChatStreamEventDto) => void | Promise<void>;
@@ -105,93 +105,141 @@ export class ChatService {
     });
     await write({ type: 'message_saved', messageId: userMessage.id });
 
-    const directToolCall = parseDirectToolRequest(content);
-    if (directToolCall) {
-      await this.handleDirectToolCall(userId, workspaceId, userMessage.id, directToolCall, startedAt, write);
-      return;
-    }
-
-    const retrieved = await this.retrieval.retrieve(workspaceId, content);
-    const retrievalDebug = retrieved.map(toRetrievalDebugChunk);
-    await write({ type: 'retrieval', chunks: retrievalDebug });
-
-    const history = await this.loadRecentHistory(workspaceId, userMessage.id);
-    const aiMessages = this.buildInitialAiMessages(history, content, retrieved);
     const executedToolCallIds: string[] = [];
-    let result = await this.ai.generate({
-      system: buildRagSystemPrompt(),
-      messages: aiMessages,
-      tools: this.tools.declarations,
-    });
+    let successfulToolCallCount = 0;
+    let retrieved: RetrievedChunk[] = [];
+    let retrievalDebug: RetrievalDebugChunkDto[] = [];
+    const fallbackToolCall = parseDirectToolRequest(content);
 
-    for (let step = 0; step < 3 && result.toolCalls.length > 0; step += 1) {
-      const toolSummaries: string[] = [];
-      for (const toolCall of result.toolCalls) {
-        const logged = await this.executeAndLogTool(workspaceId, userId, userMessage.id, toolCall, result.model);
-        executedToolCallIds.push(logged.id);
-        await write({ type: 'tool_call', toolCall: logged });
-        toolSummaries.push(
-          `${toolCall.name}: ${logged.status} ${JSON.stringify(logged.result ?? logged.error)}`,
-        );
+    try {
+      if (!fallbackToolCall) {
+        retrieved = await this.retrieval.retrieve(workspaceId, content);
+        retrievalDebug = retrieved.map(toRetrievalDebugChunk);
       }
+      await write({ type: 'retrieval', chunks: retrievalDebug });
 
-      aiMessages.push({
-        role: 'user',
-        content: `Tool execution results:\n${toolSummaries.join('\n')}\nContinue with the final answer. If more action is needed, request another registered tool.`,
-      });
-
-      result = await this.ai.generate({
+      const history = await this.loadRecentHistory(workspaceId, userMessage.id);
+      const aiMessages = this.buildInitialAiMessages(history, content, retrieved);
+      let result = await this.ai.generate({
         system: buildRagSystemPrompt(),
         messages: aiMessages,
         tools: this.tools.declarations,
       });
-    }
 
-    const finalText = this.finalizeAnswer(result.text, retrieved, executedToolCallIds.length > 0);
-    const citations = this.buildCitations(finalText, retrieved, executedToolCallIds.length > 0);
-    for (const token of tokenizeForStreaming(finalText)) {
-      await write({ type: 'token', token });
-    }
+      for (let step = 0; step < 3 && result.toolCalls.length > 0; step += 1) {
+        const toolSummaries: string[] = [];
+        for (const toolCall of result.toolCalls) {
+          const logged = await this.executeAndLogTool(
+            workspaceId,
+            userId,
+            userMessage.id,
+            toolCall,
+            result.model,
+            { skipReason: getToolExecutionSkipReason(content, toolCall.name) },
+          );
+          executedToolCallIds.push(logged.id);
+          if (logged.status === 'SUCCESS') {
+            successfulToolCallCount += 1;
+          }
+          await write({ type: 'tool_call', toolCall: logged });
+          toolSummaries.push(
+            `${toolCall.name}: ${logged.status} ${JSON.stringify(logged.result ?? logged.error)}`,
+          );
+        }
 
-    const assistantMessage = await this.prisma.message.create({
-      data: {
-        workspaceId,
-        userId,
-        role: 'ASSISTANT',
-        content: finalText,
-        citations,
+        aiMessages.push({
+          role: 'user',
+          content: `Tool execution results:\n${toolSummaries.join('\n')}\nContinue with the final answer. If more action is needed, request another registered tool.`,
+        });
+
+        result = await this.ai.generate({
+          system: buildRagSystemPrompt(),
+          messages: aiMessages,
+          tools: this.tools.declarations,
+        });
+      }
+
+      const hadSuccessfulToolCalls = successfulToolCallCount > 0;
+      const finalText = this.finalizeAnswer(result.text, retrieved, hadSuccessfulToolCalls);
+      const citations = this.buildCitations(finalText, retrieved, hadSuccessfulToolCalls);
+      for (const token of tokenizeForStreaming(finalText)) {
+        await write({ type: 'token', token });
+      }
+
+      const assistantMessage = await this.prisma.message.create({
+        data: {
+          workspaceId,
+          userId,
+          role: 'ASSISTANT',
+          content: finalText,
+          citations,
+          retrieval: retrievalDebug,
+          toolCalls: executedToolCallIds,
+        },
+      });
+
+      await this.prisma.toolCall.updateMany({
+        where: {
+          id: { in: executedToolCallIds },
+        },
+        data: {
+          messageId: assistantMessage.id,
+        },
+      });
+
+      await this.prisma.requestLog.create({
+        data: {
+          workspaceId,
+          operation: 'chat.stream',
+          model: result.model,
+          inputTokens: result.usage?.inputTokens ?? null,
+          outputTokens: result.usage?.outputTokens ?? null,
+          retrievalCount: retrieved.length,
+          latencyMs: Date.now() - startedAt,
+          status: 'success',
+        },
+      });
+
+      await write({
+        type: 'done',
+        message: toMessageDto(assistantMessage),
         retrieval: retrievalDebug,
-        toolCalls: executedToolCallIds,
-      },
-    });
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Chat failed.';
+      if (fallbackToolCall && executedToolCallIds.length === 0) {
+        await this.prisma.requestLog.create({
+          data: {
+            workspaceId,
+            operation: 'chat.stream',
+            model: null,
+            inputTokens: null,
+            outputTokens: null,
+            retrievalCount: retrieved.length,
+            latencyMs: Date.now() - startedAt,
+            status: 'fallback',
+            error: message.slice(0, 1000),
+          },
+        });
+        await this.handleDirectToolCall(userId, workspaceId, userMessage.id, fallbackToolCall, startedAt, write);
+        return;
+      }
 
-    await this.prisma.toolCall.updateMany({
-      where: {
-        id: { in: executedToolCallIds },
-      },
-      data: {
-        messageId: assistantMessage.id,
-      },
-    });
-
-    await this.prisma.requestLog.create({
-      data: {
-        workspaceId,
-        operation: 'chat.stream',
-        model: result.model,
-        inputTokens: result.usage?.inputTokens ?? null,
-        outputTokens: result.usage?.outputTokens ?? null,
-        retrievalCount: retrieved.length,
-        latencyMs: Date.now() - startedAt,
-        status: 'success',
-      },
-    });
-
-    await write({
-      type: 'done',
-      message: toMessageDto(assistantMessage),
-      retrieval: retrievalDebug,
-    });
+      await this.prisma.requestLog.create({
+        data: {
+          workspaceId,
+          operation: 'chat.stream',
+          model: null,
+          inputTokens: null,
+          outputTokens: null,
+          retrievalCount: retrieved.length,
+          latencyMs: Date.now() - startedAt,
+          status: 'failed',
+          error: message.slice(0, 1000),
+        },
+      });
+      throw error;
+    }
   }
 
   private async handleDirectToolCall(
@@ -291,6 +339,7 @@ export class ChatService {
     messageId: string,
     toolCall: AiToolCall,
     model: string,
+    options: { skipReason?: string | null } = {},
   ): Promise<ToolCallDto> {
     const startedAt = Date.now();
     let status: 'SUCCESS' | 'FAILED' | 'SKIPPED' = 'FAILED';
@@ -298,13 +347,18 @@ export class ChatService {
     let error: string | null = null;
 
     try {
-      const execution = await this.tools.execute(toolCall.name, toolCall.args, {
-        workspaceId,
-        userId,
-      });
-      status = execution.status;
-      result = execution.result;
-      error = execution.error;
+      if (options.skipReason) {
+        status = 'SKIPPED';
+        error = options.skipReason;
+      } else {
+        const execution = await this.tools.execute(toolCall.name, toolCall.args, {
+          workspaceId,
+          userId,
+        });
+        status = execution.status;
+        result = execution.result;
+        error = execution.error;
+      }
     } catch (executionError) {
       error = executionError instanceof Error ? executionError.message : 'Tool execution failed.';
     }

@@ -3,9 +3,26 @@ import type { AiToolCall } from '../ai/types';
 
 const TASK_INTENT = /\b(?:create|save|add|record)\b.*\btask\b/i;
 const NOTE_INTENT = /\b(?:create|save|add|record)\b.*\b(?:workspace\s+)?note\b/i;
+const SUPPORTED_TOOL_NAMES = new Set(['save_task', 'save_workspace_note']);
+
+export function getToolExecutionSkipReason(content: string, toolName: string): string | null {
+  if (!SUPPORTED_TOOL_NAMES.has(toolName)) {
+    return `Unknown tool: ${toolName}`;
+  }
+
+  if (toolName === 'save_task' && TASK_INTENT.test(normalizeContent(content))) {
+    return null;
+  }
+
+  if (toolName === 'save_workspace_note' && NOTE_INTENT.test(normalizeContent(content))) {
+    return null;
+  }
+
+  return 'Tool call skipped because the latest user message did not explicitly request this side effect.';
+}
 
 export function parseDirectToolRequest(content: string): AiToolCall | null {
-  const normalized = content.trim().replace(/\s+/g, ' ');
+  const normalized = normalizeContent(content);
   if (!normalized) {
     return null;
   }
@@ -134,4 +151,8 @@ function cleanValue(value: string): string {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeContent(content: string): string {
+  return content.trim().replace(/\s+/g, ' ');
 }
