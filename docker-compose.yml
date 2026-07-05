@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    container_name: workspace-rag-postgres
+    environment:
+      POSTGRES_DB: workspace_rag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "15433:5432"
+    volumes:
+      - workspace-rag-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d workspace_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  workspace-rag-postgres:

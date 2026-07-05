@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  owner
+  member
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum ToolCallStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String
+  passwordHash String            @map("password_hash")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  memberships  WorkspaceMember[]
+  messages     Message[]
+  tasks        Task[]            @relation("TaskCreator")
+  notes        WorkspaceNote[]   @relation("NoteCreator")
+  toolCalls    ToolCall[]
+
+  @@map("users")
+}
+
+model Workspace {
+  id          String            @id @default(cuid())
+  name        String
+  slug        String            @unique
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  memberships WorkspaceMember[]
+  documents   Document[]
+  chunks      DocumentChunk[]
+  messages    Message[]
+  toolCalls   ToolCall[]
+  tasks       Task[]
+  notes       WorkspaceNote[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String        @map("workspace_id")
+  userId      String        @map("user_id")
+  role        WorkspaceRole @default(member)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model Document {
+  id          String         @id @default(cuid())
+  workspaceId String         @map("workspace_id")
+  filename    String
+  originalName String        @map("original_name")
+  mimeType    String         @map("mime_type")
+  byteSize    Int            @map("byte_size")
+  sha256      String
+  status      DocumentStatus @default(PENDING)
+  chunkCount  Int            @default(0) @map("chunk_count")
+  error       String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chunks      DocumentChunk[]
+
+  @@unique([workspaceId, sha256])
+  @@index([workspaceId])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id            String                @id @default(cuid())
+  workspaceId   String                @map("workspace_id")
+  documentId    String                @map("document_id")
+  chunkIndex    Int                   @map("chunk_index")
+  content       String
+  tokenEstimate Int                   @map("token_estimate")
+  pageNumber    Int?                  @map("page_number")
+  section       String?
+  contentHash   String                @map("content_hash")
+  embedding     Unsupported("vector")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  document      Document              @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([workspaceId])
+  @@map("document_chunks")
+}
+
+model Message {
+  id          String      @id @default(cuid())
+  workspaceId String      @map("workspace_id")
+  userId      String?     @map("user_id")
+  role        MessageRole
+  content     String
+  citations   Json?
+  retrieval   Json?
+  toolCalls   Json?       @map("tool_calls")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  toolCallRows ToolCall[]
+
+  @@index([workspaceId, createdAt])
+  @@map("messages")
+}
+
+model ToolCall {
+  id          String         @id @default(cuid())
+  workspaceId String         @map("workspace_id")
+  messageId   String?        @map("message_id")
+  userId      String?        @map("user_id")
+  toolName    String         @map("tool_name")
+  status      ToolCallStatus
+  args        Json
+  result      Json?
+  error       String?
+  latencyMs   Int?           @map("latency_ms")
+  model       String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  message     Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@map("tool_calls")
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  title       String
+  description String?
+  status      String    @default("open")
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User?     @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@map("tasks")
+}
+
+model WorkspaceNote {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  title       String
+  body        String
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User?     @relation("NoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@map("workspace_notes")
+}
+
+model RequestLog {
+  id             String    @id @default(cuid())
+  workspaceId    String?   @map("workspace_id")
+  operation      String
+  model          String?
+  inputTokens    Int?      @map("input_tokens")
+  outputTokens   Int?      @map("output_tokens")
+  retrievalCount Int?      @map("retrieval_count")
+  latencyMs      Int       @map("latency_ms")
+  status         String
+  error          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@map("request_logs")
+}

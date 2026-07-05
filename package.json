@@ -1,0 +1,28 @@
+{
+  "name": "workspace-rag-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-workspace document assistant with RAG, tool calling, and strict shared-vector-store isolation.",
+  "packageManager": "pnpm@11.5.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "turbo dev --parallel",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "e2e": "turbo e2e",
+    "format": "prettier --write .",
+    "prisma:generate": "pnpm --filter @workspace-rag/api prisma:generate",
+    "db:migrate": "pnpm --filter @workspace-rag/api prisma:migrate",
+    "db:deploy": "pnpm --filter @workspace-rag/api prisma:deploy",
+    "db:seed": "pnpm --filter @workspace-rag/api prisma:seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.7.4",
+    "turbo": "^2.7.0",
+    "typescript": "^5.9.3"
+  }
+}
