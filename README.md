@@ -8,8 +8,8 @@ The critical requirement is tenant isolation inside one shared vector store. All
 - Frontend: Next.js App Router, Tailwind, shadcn-style primitives, Motion, lucide-react.
 - Backend: NestJS, Prisma, Postgres, pgvector.
 - AI provider: Gemini adapter for chat/tool calling and embeddings.
-- Data: Neon Postgres in production, local pgvector Postgres through Docker.
-- Deployment target: Vercel Hobby for web, Render Free Web Service for API, Neon Free Postgres.
+- Data: Postgres with pgvector. Local development can use Docker; the hosted assessment deployment uses Postgres/pgvector on EC2.
+- Deployment: Next.js web and NestJS API run on the existing EC2 host behind Nginx, PM2, HTTPS, and DuckDNS.
 
 ## Local Setup
 
@@ -75,17 +75,17 @@ pnpm e2e
 
 ## Deployment Notes
 
-1. Create a Neon free Postgres project and enable `vector`.
-2. Set `DATABASE_URL` in Render and run `pnpm db:deploy && pnpm db:seed`.
-3. Deploy `apps/api` to Render as a Node web service from the repository root with build command `corepack enable && pnpm install --frozen-lockfile && pnpm --filter @workspace-rag/api build` and start command `pnpm --filter @workspace-rag/api start`.
-4. Deploy `apps/web` to Vercel with `API_INTERNAL_ORIGIN` set to the Render API URL.
-5. Set `WEB_ORIGIN` on Render to the Vercel URL.
+The hosted assessment deployment is on the existing EC2 instance:
 
-The deployed URL and final repo URL should be added here after deployment:
+- Nginx routes `https://rag-workspace.duckdns.org` to the Next.js web app.
+- Nginx routes `https://rag-workspace.duckdns.org/api/*` to the NestJS API.
+- PM2 process names are `workspace-rag-web` and `workspace-rag-api`.
+- Persistent state is stored in the EC2 Postgres database `workspace_rag` with the `vector` extension enabled.
+- Production env files live outside the repository under `/home/ubuntu/config/workspace-rag`.
 
 - Repository: `https://github.com/Shantanub05/workspace-rag-assistant`
-- Web URL: pending deployment
-- API URL: pending deployment
+- Web URL: `https://rag-workspace.duckdns.org`
+- API health URL: `https://rag-workspace.duckdns.org/api/health`
 
 ## AI Context Files
 
