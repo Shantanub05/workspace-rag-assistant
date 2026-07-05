@@ -77,7 +77,7 @@ pnpm e2e
 
 1. Create a Neon free Postgres project and enable `vector`.
 2. Set `DATABASE_URL` in Render and run `pnpm db:deploy && pnpm db:seed`.
-3. Deploy `apps/api` to Render as a Node web service with build command `pnpm install --frozen-lockfile && pnpm --filter @workspace-rag/api build` and start command `pnpm --filter @workspace-rag/api start`.
+3. Deploy `apps/api` to Render as a Node web service from the repository root with build command `corepack enable && pnpm install --frozen-lockfile && pnpm --filter @workspace-rag/api build` and start command `pnpm --filter @workspace-rag/api start`.
 4. Deploy `apps/web` to Vercel with `API_INTERNAL_ORIGIN` set to the Render API URL.
 5. Set `WEB_ORIGIN` on Render to the Vercel URL.
 
