@@ -9,11 +9,12 @@ import type {
 } from '@workspace-rag/shared';
 import { Prisma } from '@prisma/client';
 import { AI_PROVIDER, type AiMessage, type AiProvider, type AiToolCall } from '../ai/types';
-import type { JsonRecord } from '../common/json';
+import { isRecord, type JsonRecord } from '../common/json';
 import { PrismaService } from '../prisma/prisma.service';
 import { RetrievalService, type RetrievedChunk } from '../retrieval/retrieval.service';
 import { ToolsService } from '../tools/tools.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
+import { parseDirectToolRequest } from './direct-tool-request';
 import { buildRagSystemPrompt, formatRetrievedContext } from './prompt';
 
 type StreamWriter = (event: ChatStreamEventDto) => void | Promise<void>;
@@ -104,6 +105,12 @@ export class ChatService {
     });
     await write({ type: 'message_saved', messageId: userMessage.id });
 
+    const directToolCall = parseDirectToolRequest(content);
+    if (directToolCall) {
+      await this.handleDirectToolCall(userId, workspaceId, userMessage.id, directToolCall, startedAt, write);
+      return;
+    }
+
     const retrieved = await this.retrieval.retrieve(workspaceId, content);
     const retrievalDebug = retrieved.map(toRetrievalDebugChunk);
     await write({ type: 'retrieval', chunks: retrievalDebug });
@@ -184,6 +191,60 @@ export class ChatService {
       type: 'done',
       message: toMessageDto(assistantMessage),
       retrieval: retrievalDebug,
+    });
+  }
+
+  private async handleDirectToolCall(
+    userId: string,
+    workspaceId: string,
+    userMessageId: string,
+    toolCall: AiToolCall,
+    startedAt: number,
+    write: StreamWriter,
+  ): Promise<void> {
+    const logged = await this.executeAndLogTool(workspaceId, userId, userMessageId, toolCall, 'server-direct');
+    await write({ type: 'tool_call', toolCall: logged });
+
+    const finalText = this.buildToolOnlyAnswer(logged);
+    for (const token of tokenizeForStreaming(finalText)) {
+      await write({ type: 'token', token });
+    }
+
+    const assistantMessage = await this.prisma.message.create({
+      data: {
+        workspaceId,
+        userId,
+        role: 'ASSISTANT',
+        content: finalText,
+        citations: [],
+        retrieval: [],
+        toolCalls: [logged.id],
+      },
+    });
+
+    await this.prisma.toolCall.update({
+      where: { id: logged.id },
+      data: { messageId: assistantMessage.id },
+    });
+
+    await this.prisma.requestLog.create({
+      data: {
+        workspaceId,
+        operation: 'chat.tool.direct',
+        model: 'server-direct',
+        inputTokens: null,
+        outputTokens: null,
+        retrievalCount: 0,
+        latencyMs: Date.now() - startedAt,
+        status: logged.status === 'SUCCESS' ? 'success' : 'failed',
+        error: logged.error,
+      },
+    });
+
+    await write({
+      type: 'done',
+      message: toMessageDto(assistantMessage),
+      retrieval: [],
     });
   }
 
@@ -301,6 +362,27 @@ export class ChatService {
       quote: chunk.preview.slice(0, 360),
     }));
   }
+
+  private buildToolOnlyAnswer(toolCall: ToolCallDto): string {
+    if (toolCall.status !== 'SUCCESS') {
+      return `I could not run ${toolCall.toolName}: ${toolCall.error ?? 'Tool validation failed.'}`;
+    }
+
+    const title = readStringField(toolCall.result, 'title') ?? readStringField(toolCall.args, 'title');
+    if (toolCall.toolName === 'save_task') {
+      return title
+        ? `Saved task "${title}" in the active workspace.`
+        : 'Saved the task in the active workspace.';
+    }
+
+    if (toolCall.toolName === 'save_workspace_note') {
+      return title
+        ? `Saved workspace note "${title}" in the active workspace.`
+        : 'Saved the workspace note in the active workspace.';
+    }
+
+    return 'Done. I recorded that in the active workspace.';
+  }
 }
 
 function tokenizeForStreaming(text: string): string[] {
@@ -341,6 +423,14 @@ function isChunkReferenced(
   return [chunk.documentName, chunk.chunkId, chunk.section]
     .filter((value): value is string => Boolean(value))
     .some((value) => normalizedText.includes(value.toLowerCase()));
+}
+
+function readStringField(value: unknown, key: string): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const field = value[key];
+  return typeof field === 'string' ? field : null;
 }
 
 function toRetrievalDebugChunk(chunk: RetrievedChunk): RetrievalDebugChunkDto {
