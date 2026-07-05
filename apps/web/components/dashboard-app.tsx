@@ -479,9 +479,9 @@ function ChatPanel({
   busy: boolean;
 }): React.JSX.Element {
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <div className="glass-panel flex min-h-[620px] flex-col rounded-lg">
-        <div className="scrollbar-thin flex-1 space-y-3 overflow-y-auto p-4">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
+      <div className="glass-panel flex h-[clamp(560px,calc(100vh-230px),780px)] min-w-0 flex-col overflow-hidden rounded-lg">
+        <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           {messages.length === 0 ? (
             <EmptyState
               icon={Bot}
@@ -502,7 +502,7 @@ function ChatPanel({
             </div>
           ) : null}
         </div>
-        <form className="border-t border-ink/10 p-4" onSubmit={(event) => void sendMessage(event)}>
+        <form className="shrink-0 border-t border-ink/10 p-4" onSubmit={(event) => void sendMessage(event)}>
           <div className="flex gap-2">
             <Textarea
               value={question}
@@ -517,7 +517,7 @@ function ChatPanel({
           </div>
         </form>
       </div>
-      <div className="glass-panel rounded-lg p-4">
+      <div className="glass-panel h-fit self-start rounded-lg p-4">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <ShieldCheck className="h-4 w-4 text-moss" />
           Isolation check
