@@ -21,6 +21,14 @@
 - Backend migration: `pnpm --filter @workspace-rag/api prisma:migrate`
 - Backend seed: `pnpm --filter @workspace-rag/api prisma:seed`
 
+## Git Workflow
+- Commit and push work in small, reviewable milestones. Do not batch unrelated frontend, backend, docs, and test changes into one large commit when they can be separated.
+- Use Conventional Commit subjects: `feat(scope): summary`, `fix(scope): summary`, `refactor(scope): summary`, `test(scope): summary`, `docs(scope): summary`, `chore(scope): summary`.
+- Keep commit scopes aligned to the repo surface, such as `api`, `web`, `shared`, `docs`, `db`, `rag`, `auth`, or `tools`.
+- Use clear PR titles with the same convention, for example `feat(rag): add workspace-scoped retrieval debug`.
+- Stage files intentionally with `git status` review before every commit. Never include generated artifacts, local `.env` files, logs, or unrelated user changes.
+- Push after each coherent milestone once relevant checks pass or the skipped-check reason is documented.
+
 ## Engineering Standards
 - Use TypeScript strict mode everywhere. Do not introduce `any` unless the boundary is unavoidable and guarded by runtime validation.
 - Keep business logic in services, not controllers or React components.
