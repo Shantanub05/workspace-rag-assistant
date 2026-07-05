@@ -284,7 +284,7 @@ export class ChatService {
     retrieved: RetrievedChunk[],
     hadToolCalls: boolean,
   ): CitationDto[] {
-    if (hadToolCalls || containsDontKnow(finalText)) {
+    if (hadToolCalls || isFullyUnsupportedAnswer(finalText)) {
       return [];
     }
 
@@ -307,6 +307,14 @@ function tokenizeForStreaming(text: string): string[] {
 
 function containsDontKnow(text: string): boolean {
   return text.toLowerCase().includes("don't know") || text.toLowerCase().includes('do not know');
+}
+
+export function isFullyUnsupportedAnswer(text: string): boolean {
+  const normalized = text.trim().replace(/\s+/g, ' ').replace(/[.!?]+$/, '').toLowerCase();
+  return (
+    normalized === "i don't know from this workspace's documents" ||
+    normalized === 'i do not know from this workspace\'s documents'
+  );
 }
 
 function toRetrievalDebugChunk(chunk: RetrievedChunk): RetrievalDebugChunkDto {
